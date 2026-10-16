@@ -6,12 +6,13 @@ import { Z } from './zone.js';
 import { P } from './plane.js';
 import { I, nearestItem, itemLabel } from './items.js';
 import { input, zoomFactor, playerAGL, scopeList } from './player.js';
-import { ITEM_DEFS, MAP_HALF, ARMOR_DURA, CONSUMABLES, SCAN_TIME } from './config.js';
+import { ITEM_DEFS, MAP_HALF, ARMOR_DURA, CONSUMABLES, SCAN_TIME, WEAPONS } from './config.js';
+import { trainingSummary } from './training.js';
 import { fmtTime } from './util.js';
 
 const $ = id => document.getElementById(id);
 let el = {};
-let mmTimer = 0, slowTimer = 0;
+let mmTimer = 0, slowTimer = 0, lastWeaponKey = '';
 const v3 = new THREE.Vector3(), fwd = new THREE.Vector3();
 const revealLabels = new Map();
 const eyeEls = new Map();
@@ -27,11 +28,14 @@ export function initHUD() {
     items: $('items'), cap: $('cap'), scope: $('scopeOverlay'), scopeLbl: $('scopeLbl'),
     blind: $('blind'), zoneTint: $('zoneTint'), vignette: $('vignette'),
     bigmap: $('bigmap'), bigCanvas: $('bigCanvas'), inv: $('invpanel'), crosshair: $('crosshair'), zoomTag: $('zoomTag'),
+    train: $('trainPanel'),
   };
+  lastWeaponKey = '';
   el.mm = el.minimap.getContext('2d');
 }
 
 export function resetHUD() {
+  lastWeaponKey = '';
   el.killfeed.innerHTML = '';
   el.floaters.innerHTML = '';
   el.eyes.innerHTML = '';
@@ -147,6 +151,18 @@ export function updateHUD(dt) {
   if (!p) return;
   slowTimer -= dt;
   mmTimer -= dt;
+  // 读码武器提示
+  const W = WEAPONS[p.weapon] || WEAPONS.std;
+  const wkey = p.weapon + '|' + p.weaponList().join(',');
+  if (wkey !== lastWeaponKey) {
+    lastWeaponKey = wkey;
+    const owned = p.weaponList();
+    if (owned.length <= 1) el.codeHint.innerHTML = '看清敌人胸口 / 额头的数字，直接用键盘输入';
+    else el.codeHint.innerHTML = `<kbd>R</kbd> <b class="w-${p.weapon}">${W.name}</b> ${W.hint} · 伤害 ×${W.mult}` +
+      `<span class="owned">${owned.map(w => `<i class="${w === p.weapon ? 'on w-' + w : ''}">${WEAPONS[w].short}</i>`).join('')}</span>`;
+    el.slots[3].style.display = W.len === 4 ? '' : 'none';
+    el.codeArea.dataset.w = p.weapon;
+  }
   // 数字输入
   const buf = G.codeBuf;
   const showLast = G.lastCode && G.time - (G.lastCodeT || 0) < 0.45;
@@ -221,13 +237,26 @@ export function updateHUD(dt) {
     const alive = G.actors.filter(a => a.alive).length;
     el.alive.textContent = alive;
     el.kills.textContent = p.kills;
+    if (G.training) {
+      el.zoneinfo.innerHTML = '训练场 · 木人被读倒 1.5 秒后复活 · <kbd>Esc</kbd> 暂停可返回菜单';
+      const st = trainingSummary();
+      const tot = st.hits + G.stats.miss;
+      el.train.innerHTML = `<h4>读码训练</h4>
+        <div class="tg"><span>命中</span><b>${st.hits}</b><span>头 / 身</span><b>${st.head} / ${st.body}</b>
+        <span>读错</span><b>${G.stats.miss}</b><span>准确率</span><b>${tot ? Math.round(st.hits / tot * 100) + '%' : '—'}</b>
+        <span>平均用时</span><b>${st.avg != null ? st.avg.toFixed(2) + 's' : '—'}</b><span>最快</span><b>${st.best != null ? st.best.toFixed(2) + 's' : '—'}</b></div>
+        <p>用时 = 数字出现在视野里到你读中为止</p>
+        <ul><li>10 / 18 / 24 / 32 / 45 / 60 / 100 / 150 米各一个木人</li>
+        <li>18 米：躲在矮墙后，只能读头</li><li>24 米：背对你，带着扫描器走近</li>
+        <li>45 米：干扰涂层 · 60 米：三级头甲，试试破甲码</li></ul>`;
+    }
     // 圈信息
     let zt = '';
     if (Z.state === 'wait') zt = Z.phase < 0 ? `首个安全区 <b>${fmtTime(Z.timer)}</b> 后开始收缩` : `安全区 <b>${fmtTime(Z.timer)}</b> 后收缩`;
     else if (Z.state === 'shrink') zt = `<span class="warn">安全区收缩中</span> <b>${fmtTime(Z.timer)}</b>`;
     else zt = '最终安全区';
     if (outside) zt += ` · <span class="danger">你在安全区外！-${Z.dps}/秒</span>`;
-    el.zoneinfo.innerHTML = zt;
+    if (!G.training) el.zoneinfo.innerHTML = zt;
     // 血量
     el.hpFill.style.width = Math.max(0, p.hp) + '%';
     el.hpFill.className = p.hp < 30 ? 'low' : p.hp < 75 ? 'mid' : '';
@@ -401,6 +430,12 @@ export function drawBigMap() {
     const [x, y] = w2m(t.x, t.z, 0, 0, scale, S);
     ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.strokeText(t.name, x, y - t.r * scale - 4);
     ctx.fillStyle = '#fff'; ctx.fillText(t.name, x, y - t.r * scale - 4);
+  }
+  if (W.range) {
+    const r = W.range;
+    const [x, y] = w2m(r.x, r.z1, 0, 0, scale, S);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.strokeText(r.name, x, y - 6);
+    ctx.fillStyle = '#ffe6a1'; ctx.fillText(r.name, x, y - 6);
   }
   drawDrops(ctx, 0, 0, scale, S);
   const p = G.player;

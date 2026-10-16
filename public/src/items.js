@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { G } from './state.js';
 import { W, heightAt, forEachNear, segSphere } from './world.js';
 import { groundAt } from './physics.js';
-import { ITEM_DEFS, LOOT_TABLE, ARMOR_DURA } from './config.js';
+import { ITEM_DEFS, LOOT_TABLE, ARMOR_DURA, WEAPONS } from './config.js';
 import { weightedPick } from './util.js';
 import { doFlash } from './combat.js';
 
@@ -23,13 +23,14 @@ function itemMesh(key) {
     geo.boost = new THREE.CylinderGeometry(0.07, 0.07, 0.26, 10);
     geo.throw = new THREE.CylinderGeometry(0.08, 0.08, 0.22, 8);
     geo.camo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    geo.weapon = new THREE.BoxGeometry(0.36, 0.06, 0.26);
     geo.ring = new THREE.RingGeometry(0.42, 0.5, 20).rotateX(-Math.PI / 2);
     geo.crate = new THREE.BoxGeometry(1.4, 1.1, 1.4);
     geo.nade = new THREE.SphereGeometry(0.09, 8, 6);
   }
   if (!mat[key]) mat[key] = new THREE.MeshLambertMaterial({ color: d.color, emissive: d.color, emissiveIntensity: 0.25 });
   const m = new THREE.Mesh(geo[d.cat], mat[key]);
-  const lvl = d.level || (d.cat === 'scope' ? (d.zoom === 8 ? 3 : d.zoom === 4 ? 2 : 1) : d.cat === 'scanner' ? 3 : 0);
+  const lvl = d.level || d.rare || (d.cat === 'scope' ? (d.zoom === 8 ? 3 : d.zoom === 4 ? 2 : 1) : d.cat === 'scanner' ? 3 : 0);
   if (lvl) {
     const ringColor = [0, 0xd8d8d8, 0x5ab0ff, 0xc77dff][lvl];
     const ring = new THREE.Mesh(geo.ring, new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.75, side: THREE.DoubleSide }));
@@ -100,6 +101,7 @@ export function wantsItem(a, it) {
     case 'bag': return a.bag < d.level;
     case 'scope': return !a.scopes.has(d.zoom);
     case 'scanner': return !a.scanner;
+    case 'weapon': return !a.weapons.has(d.weapon);
     default: return a.capacity() - a.invWeight() >= d.weight;
   }
 }
@@ -128,6 +130,11 @@ export function tryPickup(a, it) {
       if (a.scopes.has(d.zoom)) return { ok: false, msg: '已有' + d.name };
       a.scopes.add(d.zoom); removeItem(it);
       return { ok: true, msg: '获得 ' + d.name + (a.isPlayer ? '（右键开镜，滚轮切换）' : '') };
+    }
+    case 'weapon': {
+      if (a.weapons.has(d.weapon)) return { ok: false, msg: '已有' + d.name };
+      a.weapons.add(d.weapon); removeItem(it);
+      return { ok: true, msg: `获得 ${d.name}：${WEAPONS[d.weapon].hint}，伤害 ×${WEAPONS[d.weapon].mult}` + (a.isPlayer ? '（按 R 切换）' : '') };
     }
     case 'scanner': {
       if (a.scanner) return { ok: false, msg: '已有扫描器' };
@@ -245,7 +252,7 @@ export function spawnAirdrop(x, z) {
   return d;
 }
 
-const AIRDROP_LOOT = ['helmet3', 'armor3', 'scope8', 'medkit', 'bag3', 'scanner', 'drink', 'flash'];
+const AIRDROP_LOOT = ['helmet3', 'armor3', 'scope8', 'medkit', 'bag3', 'scanner', 'wpn_pierce', 'wpn_sniper'];
 
 export function updateItems(dt) {
   // 投掷物

@@ -12,7 +12,8 @@ import { updateScanners, platePos } from './combat.js';
 import { animateCharacter } from './character.js';
 import * as HUD from './hud.js';
 import { sfx, initAudio, setAmbience, setMuted, muted } from './audio.js';
-import { BOT_NAMES, DIFFICULTY, ITEM_DEFS } from './config.js';
+import { BOT_NAMES, DIFFICULTY, ITEM_DEFS, WEAPONS } from './config.js';
+import { T, setupTraining, clearTraining, updateTraining, trainingHit, trainingDeath } from './training.js';
 import { shuffle, fmtTime } from './util.js';
 
 const $ = id => document.getElementById(id);
@@ -97,6 +98,7 @@ function resetMatch() {
   }
   G.actors = [];
   G.player = null;
+  clearTraining();
   clearAll();
   P.active = false; P.mesh.visible = false;
   for (const f of fxList) scene.remove(f.s);
@@ -109,6 +111,8 @@ function startMatch() {
   G.settings.name = ($('nick').value || '玩家').slice(0, 12);
   G.settings.bots = Number($('botsSel').value) || 29;
   saveSettings();
+  G.training = false;
+  $('hud').classList.remove('training');
   const names = shuffle(BOT_NAMES.slice());
   const p = new Actor(G.settings.name, true, 0x3a7bd5);
   G.player = p;
@@ -141,6 +145,45 @@ function startMatch() {
   HUD.banner('运输机已起飞<small>飞到岛屿上空后按 F 跳伞 · 按 M 看地图选落点</small>');
 }
 
+function startTraining() {
+  initAudio();
+  resetMatch();
+  G.settings.name = ($('nick').value || '玩家').slice(0, 12);
+  saveSettings();
+  G.training = true;
+  G.matchTime = 0;
+  const R = W.range;
+  const p = new Actor(G.settings.name, true, 0x3a7bd5);
+  G.player = p;
+  G.actors.push(p);
+  p.state = 'ground';
+  p.pos.set(R.x, R.base + 1, R.zF + 3);
+  p.yaw = 0; p.pitch = 0;
+  p.scopes = new Set([2, 4, 8]);
+  p.scanner = true;
+  p.weapons = new Set(['std', 'quick', 'reverse', 'pierce', 'sniper']);
+  p.bag = 3;
+  Object.assign(p.inv, { bandage: 5, flash: 3, smoke: 2, camo: 1 });
+  setupTraining();
+  P.active = false; P.mesh.visible = false;
+  Z.mesh.visible = false; Z.dps = 0;
+  G.mode = 'match';
+  G.paused = false;
+  G.codeBuf = ''; G.lastCode = '';
+  G.stats = { head: 0, body: 0, miss: 0, dmg: 0 };
+  G.dropTimes = [];
+  input.scopeSel = 0; input.ads = false;
+  $('menu').classList.add('hidden');
+  $('end').classList.add('hidden');
+  $('pause').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  $('hud').classList.add('training');
+  HUD.resetHUD();
+  setAmbience('ground');
+  requestLock();
+  HUD.banner('训练场<small>木人从 10 米排到 150 米 · 按 R 切换读码武器 · 右键开镜</small>');
+}
+
 function aliveCount() { let n = 0; for (const a of G.actors) if (a.alive) n++; return n; }
 
 function endMatch(win) {
@@ -168,11 +211,16 @@ function endMatch(win) {
 G.hooks.toast = HUD.toast;
 G.hooks.onDeath = (v, att, kind) => {
   v.deathTime = G.matchTime;
+  if (G.training) {
+    if (v.dummy) { trainingDeath(v); if (att === G.player) { sfx.kill(); HUD.toast(`读倒 ${v.name} · 1.5 秒后复活`, 'ok'); } }
+    return;
+  }
   v.place = aliveCount() + 1;
   v.using = null;
   v.dropAll(spawnGround);
   if (att) { att.kills++; v.killedBy = att.name; }
-  const how = kind === 'head' ? '<span class="how head">头部识别</span>' : kind === 'body' ? '<span class="how body">身体识别</span>' : '<span class="how zone">倒在安全区外</span>';
+  const wtag = v.lastWeapon && v.lastWeapon !== 'std' && kind !== 'zone' ? WEAPONS[v.lastWeapon].short + '·' : '';
+  const how = kind === 'head' ? `<span class="how head">${wtag}头部识别</span>` : kind === 'body' ? `<span class="how body">${wtag}身体识别</span>` : '<span class="how zone">倒在安全区外</span>';
   const mine = att === G.player || v === G.player;
   HUD.killfeed(att ? `<b>${att.name}</b>${how}<b>${v.name}</b>` : `<b>${v.name}</b>${how}`, mine);
   if (att === G.player) {
@@ -192,8 +240,14 @@ G.hooks.onHit = (att, tgt, part, res) => {
     if (part === 'head') sfx.hitHead(); else sfx.hitBody();
     if (res.broke) sfx.armorBreak();
     platePos(tgt, part, tmp);
-    HUD.floatText(tmp, (part === 'head' ? '爆头 ' : '') + '-' + res.dmg + (res.broke ? ' 破甲' : ''), part);
+    const W = WEAPONS[res.weapon || 'std'];
+    const wpre = res.weapon && res.weapon !== 'std' ? W.short + ' ' : '';
+    HUD.floatText(tmp, wpre + (part === 'head' ? '爆头 ' : '') + '-' + res.dmg + (res.broke ? ' 破甲' : ''), part);
     G.stats.dmg += res.dealt;
+    if (G.training && tgt.dummy) {
+      const rt = trainingHit(tgt, part);
+      if (rt != null) { tmp.y += 0.5; HUD.floatText(tmp, rt.toFixed(2) + ' 秒', 'time'); }
+    }
   }
   if (tgt === p) {
     HUD.hurtFlash(res.dmg);
@@ -225,6 +279,7 @@ G.hooks.onAirdropLand = () => {};
 G.hooks.onJump = () => HUD.toast('自由落体中 · 按 F 开伞，W 俯冲加速', 'ok');
 G.hooks.onLand = () => HUD.banner('着陆！<small>搜集物资 · 看清敌人身上的数字并抢先输入</small>');
 G.hooks.onScopeChange = z => HUD.toast(z ? `切换到 ${z} 倍镜` : '切换到 眯眼（1.3×）', 'ok');
+G.hooks.onWeaponChange = w => HUD.toast(`${WEAPONS[w].name}：${WEAPONS[w].hint} · 伤害 ×${WEAPONS[w].mult}`, 'ok');
 G.hooks.toggleInv = () => HUD.toggleInv();
 G.hooks.toggleMap = () => HUD.toggleMap();
 G.hooks.togglePause = () => setPaused(!G.paused);
@@ -243,13 +298,14 @@ function update(dt) {
   G.matchTime += dt;
   updatePlane(dt);
   if (G.player) updatePlayer(dt);
-  for (const a of G.actors) if (!a.isPlayer) updateBot(a, dt);
+  for (const a of G.actors) if (a.ai) updateBot(a, dt);
+  if (G.training) updateTraining(dt);
   for (const a of G.actors) a.updateStatus(dt);
   updateScanners(dt);
   updateItems(dt);
-  updateZone(dt);
+  if (!G.training) updateZone(dt);
   // 圈外伤害
-  for (const a of G.actors) {
+  if (!G.training) for (const a of G.actors) {
     if (!a.alive || (a.state !== 'ground' && a.state !== 'chute')) continue;
     if (Z.dps > 0 && outsideZone(a.pos.x, a.pos.z)) {
       a.zoneTick += dt;
@@ -287,7 +343,7 @@ function update(dt) {
     if (f.t >= f.life) { scene.remove(f.s); fxList.splice(i, 1); }
   }
   HUD.updateHUD(dt);
-  if (G.mode === 'match' && G.player.alive && aliveCount() === 1) endMatch(true);
+  if (G.mode === 'match' && !G.training && G.player.alive && aliveCount() === 1) endMatch(true);
 }
 
 let stepT = 0;
@@ -334,6 +390,7 @@ function frame(now) {
 // ---------- 界面绑定 ----------
 function bindUI() {
   $('startBtn').addEventListener('click', startMatch);
+  $('trainBtn').addEventListener('click', startTraining);
   $('againBtn').addEventListener('click', startMatch);
   $('menuBtn').addEventListener('click', toMenu);
   $('quitBtn').addEventListener('click', toMenu);
@@ -371,6 +428,8 @@ function bindUI() {
 function toMenu() {
   if (document.exitPointerLock) document.exitPointerLock();
   resetMatch();
+  G.training = false;
+  $('hud').classList.remove('training');
   G.mode = 'menu';
   G.paused = false;
   Z.mesh.visible = false;
@@ -394,9 +453,10 @@ function boot() {
     console.log('world built in', Math.round(performance.now() - t0), 'ms;', W.buildings.length, 'buildings,', W.towns.length, 'towns');
     $('loading').classList.add('hidden');
     $('startBtn').disabled = false;
+    $('trainBtn').disabled = false;
     requestAnimationFrame(frame);
   }, 30);
 }
 
-window.__eye = { G, W, Z, P, I, input, segBlocked, startMatch, update, toMenu };
+window.__eye = { G, W, Z, P, I, T, input, segBlocked, startMatch, startTraining, update, toMenu };
 boot();

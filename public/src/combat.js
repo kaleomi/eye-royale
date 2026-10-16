@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { G } from './state.js';
 import { segBlocked } from './world.js';
-import { SCAN_RANGE, SCAN_TIME, REVEAL_TIME } from './config.js';
+import { SCAN_RANGE, SCAN_TIME, REVEAL_TIME, WEAPONS, weaponTransform } from './config.js';
 
 const tmp = new THREE.Vector3(), fwd = new THREE.Vector3(), proj = new THREE.Vector3();
 
@@ -41,8 +41,11 @@ export function plateVisible(viewer, target, part, ex, ey, ez) {
   return !segBlocked(ex, ey, ez, tmp.x + dx / d * 0.05, tmp.y + dy / d * 0.05, tmp.z + dz / d * 0.05);
 }
 
-export function applyHit(att, tgt, part) {
-  const res = tgt.takeHit(part, att);
+export function applyHit(att, tgt, part, weapon = 'std') {
+  const W = WEAPONS[weapon] || WEAPONS.std;
+  tgt.lastWeapon = weapon;
+  const res = tgt.takeHit(part, att, W.mult, !!W.pierce);
+  res.weapon = weapon;
   G.hooks.onHit && G.hooks.onHit(att, tgt, part, res);
   return res;
 }
@@ -57,15 +60,17 @@ function registerMiss(p, why) {
 }
 
 // 玩家输入满 4 位后判定
-export function playerSubmit(code) {
+export function playerSubmit(code, zoom = 1) {
   const p = G.player, cam = G.camera;
   if (!p.alive) return;
+  const w = p.weapon, W = WEAPONS[w];
   if (p.blindT > 1.2) { registerMiss(p, '你被闪光致盲，看不清'); return; }
+  if (W.scope && zoom < W.scope) { registerMiss(p, `${W.name}需要开 ${W.scope} 倍以上的镜`); return; }
   let target = null, part = null;
   for (const a of G.actors) {
     if (a === p || !a.alive) continue;
-    if (a.headCode === code) { target = a; part = 'head'; break; }
-    if (a.bodyCode === code) { target = a; part = 'body'; break; }
+    if (weaponTransform(w, a.headCode) === code) { target = a; part = 'head'; break; }
+    if (weaponTransform(w, a.bodyCode) === code) { target = a; part = 'body'; break; }
   }
   if (!target) { registerMiss(p, '读错了'); return; }
   const ex = cam.position.x, ey = cam.position.y, ez = cam.position.z;
@@ -80,7 +85,7 @@ export function playerSubmit(code) {
   }
   p.missStreak = 0;
   if (part === 'head') G.stats.head++; else G.stats.body++;
-  applyHit(p, target, part);
+  applyHit(p, target, part, w);
 }
 
 // 扫描器：靠近背对你的敌人，4 秒后显示其数字

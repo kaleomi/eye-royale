@@ -7,7 +7,7 @@ import { Z, outsideZone, insideNext } from './zone.js';
 import { I, tryPickup, throwNade, wantsItem } from './items.js';
 import { plateVisible, plateFacing, losBetween, applyHit } from './combat.js';
 import { P, canDrop, pathParamNear } from './plane.js';
-import { READ_RANGE_BODY, READ_RANGE_HEAD, DIFFICULTY, WATER_LEVEL } from './config.js';
+import { READ_RANGE_BODY, READ_RANGE_HEAD, DIFFICULTY, WATER_LEVEL, WEAPONS } from './config.js';
 import { angleDiff, clamp, lerp } from './util.js';
 
 const fwd = new THREE.Vector3(), tfwd = new THREE.Vector3(), dirV = new THREE.Vector3();
@@ -130,6 +130,18 @@ function setGoal(b, x, z, force = false) {
   ai.path = planPath(b.pos.x, b.pos.z, x, z);
 }
 
+// AI 按场景挑读码武器
+function pickWeapon(b, t, d, part) {
+  const ws = b.weapons;
+  const gear = part === 'head' ? t.helmet : t.armor;
+  if (ws.has('pierce') && gear && gear.lvl >= 2) return 'pierce';
+  if (ws.has('sniper') && d > 30 && b.bestScope() >= 4) return 'sniper';
+  if (ws.has('quick') && d < 14 && b.hp < 70) return 'quick';
+  if (ws.has('reverse') && Math.random() < 0.7) return 'reverse';
+  if (ws.has('quick') && d < 14) return 'quick';
+  return 'std';
+}
+
 function startRead(b, t, d) {
   const ai = b.ai;
   const part = ai.canHead && (Math.random() < ai.headPref || !ai.canBody) ? 'head' : 'body';
@@ -138,7 +150,9 @@ function startRead(b, t, d) {
   ai.readT = 0;
   ai.readPause = 0;
   ai.readCode = part === 'head' ? t.headCode : t.bodyCode;
-  ai.readNeed = ai.readBase * (1 + d / 45) * (part === 'head' ? 1.3 : 1) * (t.camoT > 0 ? 1.9 : 1) * (0.8 + Math.random() * 0.4);
+  ai.readWeapon = pickWeapon(b, t, d, part);
+  b.weapon = ai.readWeapon;
+  ai.readNeed = ai.readBase * WEAPONS[ai.readWeapon].time * (1 + d / 45) * (part === 'head' ? 1.3 : 1) * (t.camoT > 0 ? 1.9 : 1) * (0.8 + Math.random() * 0.4);
 }
 
 function think(b) {
@@ -368,7 +382,7 @@ function updateReading(b, dt) {
   ai.readT += dt;
   if (ai.readT >= ai.readNeed) {
     const d = dist2(b, t);
-    if (Math.random() < ai.acc) applyHit(b, t, ai.readPart);
+    if (Math.random() < ai.acc) applyHit(b, t, ai.readPart, ai.readWeapon || 'std');
     else b.lockT = 0.8;
     if (t.alive) startRead(b, t, d); else ai.readTarget = null;
   }

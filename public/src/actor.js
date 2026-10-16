@@ -1,7 +1,7 @@
 // 玩家与机器人共用的角色数据
 import * as THREE from 'three';
 import { G } from './state.js';
-import { ITEM_DEFS, ARMOR_REDUCE, ARMOR_DURA, BAG_CAP, HP_MAX, CONSUMABLES, DMG_HEAD, DMG_BODY } from './config.js';
+import { ITEM_DEFS, ARMOR_REDUCE, ARMOR_DURA, BAG_CAP, HP_MAX, CONSUMABLES, DMG_HEAD, DMG_BODY, WEAPON_ORDER } from './config.js';
 import { randCode } from './util.js';
 import { createCharacter, drawCodes, updateGear } from './character.js';
 
@@ -25,6 +25,8 @@ export class Actor {
     this.bag = 0;
     this.scopes = new Set();
     this.scanner = false;
+    this.weapons = new Set(['std']);
+    this.weapon = 'std';
     this.inv = {};
     for (const k of CONSUMABLES) this.inv[k] = 0;
     this.camoT = 0; this.camoRedraw = 0;
@@ -57,6 +59,8 @@ export class Actor {
     let h = randCode();
     while (h === b) h = randCode();
     this.bodyCode = b; this.headCode = h;
+    this.prevCodeAt = this.codeAt ?? G.matchTime;
+    this.codeAt = G.matchTime;
     this.reveal.clear();
     for (const v of G.actors) v.scanProg.delete(this.id);
     drawCodes(this.char, b, h, this.camoT > 0);
@@ -69,16 +73,17 @@ export class Actor {
     return w;
   }
   bestScope() { let z = 1; for (const s of this.scopes) if (s > z) z = s; return z; }
+  weaponList() { return WEAPON_ORDER.filter(w => this.weapons.has(w)); }
   refreshGear() { updateGear(this.char, this); }
 
   // 被读码命中
-  takeHit(part, attacker) {
+  takeHit(part, attacker, mult = 1, pierce = false) {
     const base = part === 'head' ? DMG_HEAD : DMG_BODY;
     const slot = part === 'head' ? 'helmet' : 'armor';
     const gear = this[slot];
-    let dmg = base, broke = false;
+    let dmg = base * mult, broke = false;
     if (gear) {
-      dmg = base * (1 - ARMOR_REDUCE[gear.lvl]);
+      if (!pierce) dmg *= 1 - ARMOR_REDUCE[gear.lvl];
       gear.dura -= base * 0.6;
       if (gear.dura <= 0) { this[slot] = null; broke = true; this.refreshGear(); }
     }
@@ -165,6 +170,7 @@ export class Actor {
     if (this.bag) items.push(['bag' + this.bag, 1]);
     for (const s of this.scopes) items.push(['scope' + s, 1]);
     if (this.scanner) items.push(['scanner', 1]);
+    for (const w of this.weapons) if (w !== 'std') items.push(['wpn_' + w, 1]);
     for (const k of CONSUMABLES) if (this.inv[k] > 0) items.push([k, this.inv[k]]);
     items.forEach(([k, n, dura], i) => {
       const a = (i / Math.max(1, items.length)) * Math.PI * 2;

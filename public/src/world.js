@@ -328,6 +328,28 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
   W.towns = []; W.buildings = []; W.obstacles = []; W.lootSpots = []; W.trees = [];
   cells.fill(undefined);
 
+  // 0. 训练靶场：一条约 230 米长、48 米宽的平地
+  let bestR = null, bestScore = -1e9;
+  for (let tries = 0; tries < 500; tries++) {
+    const x = (rng() - 0.5) * 760, zF = (rng() - 0.5) * 640 + 110;
+    let land = 0, n = 0, sum = 0, mn = 1e9, mx = -1e9;
+    for (let t = -14; t <= 222; t += 16) for (const ox of [-24, 0, 24]) {
+      const h = rawHeight(x + ox, zF - t); n++;
+      if (h > 3) land++;
+      sum += h; mn = Math.min(mn, h); mx = Math.max(mx, h);
+    }
+    const score = land / n - Math.max(0, mx - mn - 18) * 0.01;
+    if (score > bestScore) { bestScore = score; bestR = { x, zF, base: Math.max(4, sum / n) }; }
+    if (land === n && mx - mn < 18) break;
+  }
+  W.range = { x: bestR.x, zF: bestR.zF, base: bestR.base, hw: 24, z0: bestR.zF + 14, z1: bestR.zF - 222, name: '训练靶场' };
+  const RG = W.range;
+  const rangeDist = (x, z) => {
+    const cz = (RG.z0 + RG.z1) / 2, hd = (RG.z0 - RG.z1) / 2;
+    return Math.hypot(Math.max(Math.abs(x - RG.x) - RG.hw, 0), Math.max(Math.abs(z - cz) - hd, 0));
+  };
+  W.rangeDist = rangeDist;
+
   // 1. 城镇
   const names = shuffle(TOWN_NAMES.slice());
   for (let tries = 0; tries < 600 && W.towns.length < 9; tries++) {
@@ -337,11 +359,12 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
     let ok = true;
     for (const [ox, oz] of [[35, 0], [-35, 0], [0, 35], [0, -35]]) if (rawHeight(x + ox, z + oz) < 1.5) ok = false;
     for (const t of W.towns) if (Math.hypot(t.x - x, t.z - z) < 175) ok = false;
+    if (rangeDist(x, z) < 120) ok = false;
     if (!ok) continue;
     W.towns.push({ x, z, r: 42 + rng() * 30, base: Math.max(2.5, h), name: names[W.towns.length % names.length] });
   }
   // 2. 建筑位置（2D）
-  const placed = [];
+  const placed = [{ x: RG.x, z: (RG.z0 + RG.z1) / 2, hw: RG.hw + 2, hd: (RG.z0 - RG.z1) / 2 + 2 }];
   const fits = (x, z, hw, hd, margin) => {
     for (const p of placed) if (Math.abs(p.x - x) < p.hw + hw + margin && Math.abs(p.z - z) < p.hd + hd + margin) return false;
     return true;
@@ -375,7 +398,7 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
   }
   // 3. 高度图（含城镇/建筑压平）
   const H = new Float32Array(ROW * ROW);
-  const flat = placed.filter(p => !p.town).map(p => ({ x: p.x, z: p.z, base: Math.max(2, rawHeight(p.x, p.z)), r: Math.max(p.hw, p.hd) + 3 }));
+  const flat = placed.filter(p => p.type && !p.town).map(p => ({ x: p.x, z: p.z, base: Math.max(2, rawHeight(p.x, p.z)), r: Math.max(p.hw, p.hd) + 3 }));
   for (let iz = 0; iz <= N; iz++) for (let ix = 0; ix <= N; ix++) {
     const x = -MAP_HALF + ix * STEP, z = -MAP_HALF + iz * STEP;
     let h = rawHeight(x, z);
@@ -387,6 +410,8 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
       const dd = Math.hypot(x - f.x, z - f.z);
       if (dd < f.r + 10) h = lerp(h, f.base, smoothstep(f.r + 10, f.r, dd));
     }
+    const rd = rangeDist(x, z);
+    if (rd < 34) h = lerp(h, RG.base, smoothstep(34, 3, rd));
     H[iz * ROW + ix] = h;
   }
   W.heights = H;
@@ -409,7 +434,7 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
   const nrm = tg.attributes.normal.array;
   const col = new Float32Array(ROW * ROW * 3);
   const cSand = new THREE.Color('#d9c690'), cGrass1 = new THREE.Color('#5f8d3c'), cGrass2 = new THREE.Color('#86a94c');
-  const cRock = new THREE.Color('#7f776b'), cHigh = new THREE.Color('#8e9a6e'), cDirt = new THREE.Color('#9a8763'), cSea = new THREE.Color('#b7a777');
+  const cRock = new THREE.Color('#7f776b'), cHigh = new THREE.Color('#8e9a6e'), cDirt = new THREE.Color('#9a8763'), cSea = new THREE.Color('#b7a777'), cRange = new THREE.Color('#b0a582');
   const cc = new THREE.Color();
   for (let i = 0; i < ROW * ROW; i++) {
     const x = pos[i * 3], h = pos[i * 3 + 1], z = pos[i * 3 + 2], ny = nrm[i * 3 + 1];
@@ -421,6 +446,8 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
     if (town > 0) cc.lerp(cDirt, town * 0.75);
     if (ny < 0.86) cc.lerp(cRock, smoothstep(0.86, 0.7, ny));
     if (h < 2.6) cc.lerp(cSand, smoothstep(2.6, 1.0, h));
+    const rdc = rangeDist(x, z);
+    if (rdc < 8) cc.lerp(cRange, rdc <= 0 ? 0.85 : smoothstep(8, 0, rdc) * 0.85);
     if (h < -0.5) cc.copy(cSea);
     col[i * 3] = cc.r; col[i * 3 + 1] = cc.g; col[i * 3 + 2] = cc.b;
   }
@@ -439,6 +466,7 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
   // 5. 建筑
   const mb = new MeshBuilder();
   for (const p of placed) {
+    if (!p.type) continue;
     const b = { x: p.x, z: p.z, type: p.type, k: p.k, town: p.town };
     buildBuilding(b, mb, rng);
     W.buildings.push(b);
@@ -478,6 +506,7 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
       n++;
     }
   }
+  buildRangeDecor(scene, mb);
   const bmesh = new THREE.Mesh(mb.build(), new THREE.MeshLambertMaterial({ vertexColors: true }));
   bmesh.name = 'buildings';
   scene.add(bmesh);
@@ -568,6 +597,9 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
   });
   scene.add(rockMesh);
 
+  // 靶场射击线上也放几个物资点
+  for (const ox of [-14, 0, 14]) W.lootSpots.push({ x: RG.x + ox, z: RG.zF + 6, y: RG.base, indoor: false });
+
   // 7. 野外物资点
   for (let i = 0, n = 0; i < 2000 && n < 140; i++) {
     const x = (rng() - 0.5) * 1000, z = (rng() - 0.5) * 1000;
@@ -580,6 +612,57 @@ export function buildWorld(scene, seed = (Math.random() * 1e9) | 0) {
 
   buildMapCanvas(allTrees);
   return W;
+}
+
+export const RANGE_MARKS = [10, 25, 50, 75, 100, 150, 200];
+
+function signTexture(text) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f2ead2'; ctx.fillRect(0, 0, 256, 128);
+  ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = 8; ctx.strokeRect(4, 4, 248, 120);
+  ctx.fillStyle = '#c0392b'; ctx.fillRect(4, 4, 248, 22);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = 'bold 76px Consolas, "DejaVu Sans Mono", monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 76);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function buildRangeDecor(scene, mb) {
+  const r = W.range, y = r.base;
+  const white = new THREE.Color('#ecebe4'), concrete = new THREE.Color('#8e8d86'), wood = new THREE.Color('#6b4a2f');
+  // 射击台与跑道边线、距离线
+  mb.box(r.x, y + 0.03, r.zF + 5, r.hw * 2, 0.06, 10, concrete);
+  mb.box(r.x - r.hw, y + 0.02, (r.z0 + r.z1) / 2, 0.3, 0.04, r.z0 - r.z1, white);
+  mb.box(r.x + r.hw, y + 0.02, (r.z0 + r.z1) / 2, 0.3, 0.04, r.z0 - r.z1, white);
+  for (const d of RANGE_MARKS) mb.box(r.x, y + 0.02, r.zF - d, r.hw * 2, 0.04, 0.35, white);
+  // 掩体矮墙（训练“只露头”用）
+  const wx = r.x + 8, wz = r.zF - 16.5, wy0 = y - 1, wy1 = y + 1.35;
+  mb.box(wx, (wy0 + wy1) / 2, wz, 3.4, wy1 - wy0, 0.35, concrete);
+  addObstacle({ t: 0, minX: wx - 1.7, maxX: wx + 1.7, minY: wy0, maxY: wy1, minZ: wz - 0.175, maxZ: wz + 0.175 });
+  // 距离牌
+  for (const d of RANGE_MARKS) {
+    const sx = r.x - r.hw - 2, sz = r.zF - d;
+    mb.box(sx, y + 1.4, sz, 0.16, 2.8, 0.16, wood);
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.6), new THREE.MeshBasicMaterial({ map: signTexture(d + 'm') }));
+    board.position.set(sx, y + 3.4, sz);
+    scene.add(board);
+  }
+  // 入口牌
+  const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#1d2329'; ctx.fillRect(0, 0, 512, 128);
+  ctx.fillStyle = '#ffc928'; ctx.font = 'bold 64px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('训练靶场', 256, 66);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  for (const sgn of [-1, 1]) mb.box(r.x + sgn * 6, y + 2, r.zF + 11, 0.2, 4, 0.2, wood);
+  const banner = new THREE.Mesh(new THREE.PlaneGeometry(12, 3), new THREE.MeshBasicMaterial({ map: tex }));
+  banner.position.set(r.x, y + 4.6, r.zF + 11);
+  scene.add(banner);
 }
 
 function buildMapCanvas(trees) {
@@ -606,6 +689,14 @@ function buildMapCanvas(trees) {
   for (const t of trees) {
     const px = (t.x + MAP_HALF) / k, py = (t.z + MAP_HALF) / k;
     ctx.fillRect(px - 0.8, py - 0.8, 1.6, 1.6);
+  }
+  {
+    const r = W.range;
+    const x0 = (r.x - r.hw + MAP_HALF) / k, y0 = (r.z1 + MAP_HALF) / k;
+    ctx.fillStyle = 'rgba(190,178,140,0.9)';
+    ctx.fillRect(x0, y0, (r.hw * 2) / k, (r.z0 - r.z1) / k);
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    for (const d of RANGE_MARKS) ctx.fillRect(x0, (r.zF - d + MAP_HALF) / k, (r.hw * 2) / k, 1);
   }
   ctx.fillStyle = '#3b3631';
   for (const b of W.buildings) {

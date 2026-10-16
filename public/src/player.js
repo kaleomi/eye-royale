@@ -6,7 +6,7 @@ import { P, canDrop } from './plane.js';
 import { nearestItem, tryPickup, throwNade } from './items.js';
 import { playerSubmit } from './combat.js';
 import { sfx, setAmbience } from './audio.js';
-import { WATER_LEVEL, ITEM_DEFS } from './config.js';
+import { WATER_LEVEL, ITEM_DEFS, WEAPONS } from './config.js';
 import { clamp } from './util.js';
 
 export const input = {
@@ -20,19 +20,66 @@ let canvasEl = null;
 const DIGIT = {};
 for (let i = 0; i < 10; i++) { DIGIT['Digit' + i] = String(i); DIGIT['Numpad' + i] = String(i); }
 
+// ---------- 鼠标锁定与视角 ----------
+// 已知问题：Chrome（尤其 Windows / 高刷屏 / 刚锁定鼠标时）偶尔会给出一次巨大的 movementX，
+// 视角就会瞬间转半圈。这里做三层处理：
+// 1. 优先请求原始输入（unadjustedMovement），绕开系统鼠标加速，跳变基本消失；
+// 2. 锁定后的前 150ms 丢弃所有位移（锁定瞬间最容易出现跳变）；
+// 3. 单次位移远超最近平均值的事件视为跳变丢弃。
+let lockWorked = false, lockFails = 0, ignoreUntil = 0, avgMove = 8;
+
+function lockFailed(err) {
+  lockFails++;
+  // 只有从来没锁成功过、且连续失败时，才认为页面不支持锁定，改用拖动转视角
+  if (!lockWorked && (lockFails >= 2 || (err && err.name === 'NotSupportedError'))) {
+    G.dragLook = true;
+    G.hooks.onDragMode && G.hooks.onDragMode();
+  } else {
+    G.hooks.toast && G.hooks.toast('点击画面锁定鼠标', 'warn');
+  }
+}
+
 export function requestLock() {
-  if (G.dragLook || !canvasEl) return;
-  try {
-    const r = canvasEl.requestPointerLock();
-    if (r && r.catch) r.catch(() => { G.dragLook = true; G.hooks.onDragMode && G.hooks.onDragMode(); });
-  } catch (e) { G.dragLook = true; G.hooks.onDragMode && G.hooks.onDragMode(); }
+  if (G.dragLook || !canvasEl || document.pointerLockElement === canvasEl) return;
+  let r;
+  try { r = canvasEl.requestPointerLock({ unadjustedMovement: true }); }
+  catch (e) { r = null; }
+  if (r && r.catch) {
+    r.catch(err => {
+      if (err && err.name === 'NotSupportedError') {
+        // 浏览器不支持原始输入，退回普通锁定
+        try {
+          const r2 = canvasEl.requestPointerLock();
+          if (r2 && r2.catch) r2.catch(lockFailed);
+        } catch (e) { lockFailed(e); }
+      } else lockFailed(err);
+    });
+  } else if (!r) {
+    try { canvasEl.requestPointerLock(); } catch (e) { lockFailed(e); }
+  }
+}
+
+function onMouseMove(e) {
+  if (G.mode !== 'match' || G.paused) return;
+  const dx = e.movementX || 0, dy = e.movementY || 0;
+  if (input.locked) {
+    if (performance.now() < ignoreUntil) return;
+    const m = Math.max(Math.abs(dx), Math.abs(dy));
+    if (m > 160 && m > avgMove * 7) return;      // 异常跳变，丢弃
+    avgMove = avgMove * 0.85 + m * 0.15;
+    if (avgMove < 4) avgMove = 4;
+    input.mdx += dx; input.mdy += dy;
+  } else if (G.dragLook && input.dragging) {
+    if (Math.abs(dx) > 300 || Math.abs(dy) > 300) return;
+    input.mdx += dx; input.mdy += dy;
+  }
 }
 
 export function initInput(canvas) {
   canvasEl = canvas;
   window.addEventListener('keydown', onKey);
   window.addEventListener('keyup', e => { input.keys[e.code] = false; });
-  window.addEventListener('blur', () => { input.keys = {}; input.ads = false; });
+  window.addEventListener('blur', () => { input.keys = {}; input.ads = false; input.mdx = input.mdy = 0; });
   canvas.addEventListener('mousedown', e => {
     if (G.mode !== 'match' || G.paused) return;
     if (e.button === 0) {
@@ -46,15 +93,14 @@ export function initInput(canvas) {
     if (e.button === 0) input.dragging = false;
     if (e.button === 2) input.ads = false;
   });
-  document.addEventListener('mousemove', e => {
-    if (G.mode !== 'match' || G.paused) return;
-    if (input.locked || (G.dragLook && input.dragging)) { input.mdx += e.movementX; input.mdy += e.movementY; }
-  });
+  document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('pointerlockchange', () => {
     input.locked = document.pointerLockElement === canvas;
+    input.mdx = input.mdy = 0;
+    if (input.locked) { lockWorked = true; lockFails = 0; ignoreUntil = performance.now() + 150; avgMove = 8; }
     if (!input.locked && G.mode === 'match' && !G.dragLook && G.player && G.player.alive) G.hooks.onUnlock && G.hooks.onUnlock();
   });
-  document.addEventListener('pointerlockerror', () => { G.dragLook = true; G.hooks.onDragMode && G.hooks.onDragMode(); });
+  document.addEventListener('pointerlockerror', () => lockFailed(null));
   canvas.addEventListener('wheel', e => {
     if (G.mode !== 'match') return;
     e.preventDefault();
@@ -101,20 +147,39 @@ function onKey(e) {
     case 'KeyE': throwKind('smoke'); break;
     case 'Tab': G.hooks.toggleInv && G.hooks.toggleInv(); break;
     case 'KeyM': G.hooks.toggleMap && G.hooks.toggleMap(); break;
+    case 'KeyR': cycleWeapon(1); break;
   }
+}
+
+export function cycleWeapon(dir) {
+  const p = G.player;
+  if (!p || !p.alive) return;
+  const l = p.weaponList();
+  if (l.length <= 1) { G.hooks.toast && G.hooks.toast('只有标准读码 · 搜到读码卡后按 R 切换', 'warn'); return; }
+  let i = l.indexOf(p.weapon);
+  p.weapon = l[(i + dir + l.length) % l.length];
+  if (G.codeBuf) G.codeBuf = '';
+  sfx.clear();
+  G.hooks.onWeaponChange && G.hooks.onWeaponChange(p.weapon);
 }
 
 export function typeDigit(d) {
   const p = G.player;
   if (!p || !p.alive || (p.state !== 'ground' && p.state !== 'chute')) return;
   if (p.lockT > 0) { G.hooks.onLockedType && G.hooks.onLockedType(); return; }
+  const W = WEAPONS[p.weapon];
+  if (W.scope && zoomFactor() < W.scope) {
+    G.hooks.toast && G.hooks.toast(`${W.name}要先开 ${W.scope} 倍以上的镜（右键）`, 'warn');
+    sfx.deny();
+    return;
+  }
   G.codeBuf += d;
   sfx.key();
-  if (G.codeBuf.length >= 4) {
+  if (G.codeBuf.length >= W.len) {
     const c = G.codeBuf;
     G.codeBuf = '';
     G.lastCode = c; G.lastCodeT = G.time;
-    playerSubmit(c);
+    playerSubmit(c, zoomFactor());
   }
 }
 
@@ -157,8 +222,6 @@ function jumpOut(p) {
   p.state = 'fall';
   p.pos.copy(P.pos); p.pos.y -= 5;
   p.vel.set(P.dir.x * 20, -10, P.dir.z * 20);
-  p.yaw = Math.atan2(-P.dir.x, -P.dir.z);
-  p.pitch = -0.5;
   setAmbience('fall');
   G.hooks.onJump && G.hooks.onJump();
 }

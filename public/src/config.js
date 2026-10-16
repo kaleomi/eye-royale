@@ -44,7 +44,31 @@ export const ITEM_DEFS = {
   flash:   { name: '闪光弹', cat: 'throw', weight: 3, key: 'Q', stack: 1, color: 0xdedede },
   smoke:   { name: '烟雾弹', cat: 'throw', weight: 3, key: 'E', stack: 1, color: 0x6b8f71 },
   camo:    { name: '干扰涂层', cat: 'camo', weight: 2, use: 2, key: 'T', stack: 1, color: 0xc06cff },
+  wpn_quick:   { name: '速读码', cat: 'weapon', weapon: 'quick',   rare: 1, color: 0x48f29a },
+  wpn_reverse: { name: '反读码', cat: 'weapon', weapon: 'reverse', rare: 2, color: 0xff9f43 },
+  wpn_pierce:  { name: '破甲码', cat: 'weapon', weapon: 'pierce',  rare: 3, color: 0xff5a52 },
+  wpn_sniper:  { name: '狙读码', cat: 'weapon', weapon: 'sniper',  rare: 3, color: 0x3ee6ff },
 };
+
+// 读码武器：决定“要输入什么”和“打多少伤害”
+// len = 输入位数，mult = 伤害倍率，time = AI 读码耗时倍率
+export const WEAPONS = {
+  std:     { name: '标准读码', short: '标准', len: 4, mult: 1.0, time: 1.0,  hint: '照着输入 4 位' },
+  quick:   { name: '速读码',   short: '速读', len: 3, mult: 0.6, time: 0.65, hint: '只输入前 3 位' },
+  reverse: { name: '反读码',   short: '反读', len: 4, mult: 1.4, time: 1.35, hint: '倒着输入 4 位' },
+  pierce:  { name: '破甲码',   short: '破甲', len: 4, mult: 1.0, time: 1.5,  hint: '每位 +1 输入（9→0），无视防具', pierce: true },
+  sniper:  { name: '狙读码',   short: '狙读', len: 4, mult: 1.6, time: 1.1,  hint: '开 4 倍以上镜时照着输入', scope: 4 },
+};
+export const WEAPON_ORDER = ['std', 'quick', 'reverse', 'pierce', 'sniper'];
+
+export function weaponTransform(w, code) {
+  switch (w) {
+    case 'quick': return code.slice(0, 3);
+    case 'reverse': return code.split('').reverse().join('');
+    case 'pierce': return code.split('').map(c => String((Number(c) + 1) % 10)).join('');
+    default: return code;
+  }
+}
 
 export const CONSUMABLES = ['bandage', 'firstaid', 'medkit', 'drink', 'flash', 'smoke', 'camo'];
 
@@ -56,6 +80,7 @@ export const LOOT_TABLE = [
   ['bag1', 6], ['bag2', 3], ['bag3', 1],
   ['scope2', 5], ['scope4', 3], ['scope8', 1.5],
   ['scanner', 2.5],
+  ['wpn_quick', 4], ['wpn_reverse', 3], ['wpn_pierce', 1.8], ['wpn_sniper', 1.8],
 ];
 
 // 缩圈阶段：等待秒数 / 收缩秒数 / 目标半径 / 圈外每秒伤害

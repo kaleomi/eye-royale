@@ -87,7 +87,7 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
 @keyframes hm { 0% { opacity: 1; transform: scale(1.4); } 100% { opacity: 0; transform: scale(1); } }
 #floaters { inset: 0; z-index: 5; }
 .float { position: absolute; transform: translate(-50%, -50%); font: 800 20px/1 var(--mono); text-shadow: 0 2px 4px rgba(0,0,0,.8); animation: fl 1.1s ease-out forwards; white-space: nowrap; }
-.float.head { color: var(--amber); font-size: 24px; } .float.body { color: #fff; }
+.float.head { color: var(--amber); font-size: 24px; } .float.body { color: #fff; } .float.time { color: var(--green); font-size: 18px; }
 @keyframes fl { 0% { opacity: 1; margin-top: 0; } 100% { opacity: 0; margin-top: -46px; } }
 .reveal { position: absolute; transform: translate(-50%, -100%); background: rgba(5, 30, 38, .82); border: 1px solid var(--cyan); color: #dffaff; padding: 4px 8px 6px; border-radius: 5px; font-size: 12px; white-space: nowrap; }
 .reveal b { font: 700 15px/1 var(--mono); color: var(--cyan); }
@@ -126,6 +126,17 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
 @keyframes headf { 0% { background: rgba(255,201,40,.8); border-color: var(--amber); color: #111; } 100% { background: rgba(8,12,16,.6); } }
 @keyframes badf { 0% { background: rgba(255,90,82,.6); border-color: var(--red); } 100% { background: rgba(8,12,16,.6); } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-9px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-6px); } 80% { transform: translateX(4px); } }
+#codeHint kbd { font-size: 11px; }
+#codeHint b { font-weight: 700; }
+#codeHint .owned { display: inline-flex; gap: 4px; margin-left: 8px; }
+#codeHint .owned i { font-style: normal; font-size: 11px; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,.08); color: var(--dim); }
+#codeHint .owned i.on { background: rgba(255,255,255,.16); }
+.w-std { color: #fff; } .w-quick { color: var(--green); } .w-reverse { color: #ff9f43; } .w-pierce { color: var(--red); } .w-sniper { color: var(--cyan); }
+#codeArea[data-w="quick"] #codeSlots span.filled { border-color: var(--green); }
+#codeArea[data-w="reverse"] #codeSlots span.filled { border-color: #ff9f43; }
+#codeArea[data-w="pierce"] #codeSlots span.filled { border-color: var(--red); }
+#codeArea[data-w="sniper"] #codeSlots span.filled { border-color: var(--cyan); }
+#codeArea[data-w="reverse"] #codeSlots { flex-direction: row-reverse; }
 #lockbar { width: 232px; height: 3px; margin: 6px auto 0; background: transparent; }
 #lockbar i { display: block; height: 100%; width: 0; background: var(--red); margin: 0 auto; }
 #status { left: 50%; bottom: 18px; transform: translateX(-50%); width: 420px; }
@@ -175,6 +186,16 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
 .invgrid small { color: var(--dim); }
 .dim { color: var(--dim); font-size: 12px; }
 
+#trainPanel { display: none; left: 16px; top: 14px; width: 250px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; z-index: 12; }
+#hud.training #trainPanel { display: block; }
+#hud.training .pill { display: none; }
+#trainPanel h4 { margin: 0 0 8px; font-size: 13px; color: var(--amber); letter-spacing: .1em; }
+#trainPanel .tg { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 8px; align-items: baseline; }
+#trainPanel .tg span { color: var(--dim); }
+#trainPanel .tg b { font: 700 15px var(--mono); }
+#trainPanel p { margin: 8px 0 4px; color: var(--dim); font-size: 11.5px; }
+#trainPanel ul { margin: 0; padding-left: 16px; color: var(--dim); font-size: 11.5px; line-height: 1.6; }
+
 /* ---------- 暂停/结算 ---------- */
 .overlay { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(6,9,12,.72); backdrop-filter: blur(3px); }
 .card { background: rgba(14,18,22,.96); border: 1px solid var(--line); border-radius: 14px; padding: 28px 34px; min-width: 360px; max-width: 92vw; text-align: center; }
@@ -218,6 +239,7 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
       <div class="rule"><h4><i>背身</i>数字只在正面</h4><p>背对你的人读不到。带上扫描器靠近他，4 秒后就能显示数字。</p></div>
     </div>
     <div class="extras">
+      <b>读码武器</b>（搜到读码卡后按 R 切换）：速读码只输前 3 位但伤害 ×0.6 · 反读码倒着输入伤害 ×1.4 · 破甲码每位 +1 无视防具 · 狙读码开 4 倍镜伤害 ×1.6<br>
       特色玩法：<b>读错锁定</b>（输错会被锁 0.5–1.6 秒，乱按没用）· <b>被注视警告</b>（有人在读你时屏幕上出现“眼睛”指向他）·
       <b>干扰涂层</b>（15 秒内数字布满杂讯）· <b>掩体只露头</b>（矮墙挡住身体，只能读更小的头部数字）· <b>草丛藏身</b> · <b>空投</b>（三级装备 / 8 倍镜 / 扫描器）
     </div>
@@ -232,6 +254,7 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
     </div>
     <div class="startRow">
       <button id="startBtn" disabled>开始游戏</button>
+      <button class="ghostBtn" id="trainBtn" disabled>训练场</button>
       <button class="ghostBtn" id="muteBtn">声音：开</button>
     </div>
     <div id="touchWarn" class="hidden">检测到触屏设备：本游戏需要键盘和鼠标，建议用电脑打开。</div>
@@ -248,8 +271,10 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
         <div><kbd>Q</kbd> 闪光弹 &nbsp;<kbd>E</kbd> 烟雾弹</div>
         <div><kbd>Z</kbd> 绷带 <kbd>X</kbd> 急救包 <kbd>V</kbd> 医疗箱</div>
         <div><kbd>B</kbd> 能量饮料 <kbd>T</kbd> 干扰涂层</div>
+        <div><kbd>R</kbd> 切换读码武器</div>
         <div><kbd>Tab</kbd> 背包 &nbsp;<kbd>M</kbd> 地图</div>
         <div><kbd>Esc</kbd> 暂停</div>
+        <div>不熟悉的话先进“训练场”练练眼力</div>
       </div>
     </details>
   </div>
@@ -267,6 +292,7 @@ details.controls summary { cursor: pointer; color: #fff; font-size: 14px; }
     <div id="zoneinfo"></div>
   </div>
   <div id="killfeed"></div>
+  <div id="trainPanel"></div>
   <div id="crosshair"></div>
   <div id="hitmarker"></div>
   <div id="eyes"></div>
