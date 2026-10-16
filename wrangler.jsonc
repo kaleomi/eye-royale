@@ -1,0 +1,9 @@
+{
+  // 纯静态网页游戏：Cloudflare 直接托管 public 目录
+  "name": "eye-royale",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application"
+  }
+}
